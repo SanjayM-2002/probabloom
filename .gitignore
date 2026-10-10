@@ -1,0 +1,23 @@
+# binaries
+/probabloom
+/bin/
+*.exe
+*.test
+
+# test / profiling output
+*.out
+coverage.*
+*.prof
+
+# go workspace
+go.work
+go.work.sum
+
+# env
+.env
+
+# editor / os
+.idea/
+.vscode/
+*.swp
+.DS_Store
