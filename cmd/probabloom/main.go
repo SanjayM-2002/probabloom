@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/SanjayM-2002/probabloom/internal/experiment"
 	"github.com/SanjayM-2002/probabloom/internal/sizing"
 	"github.com/SanjayM-2002/probabloom/registry"
+	"github.com/SanjayM-2002/probabloom/strategy/counting"
 )
 
 func main() {
@@ -22,6 +24,7 @@ func main() {
 	backend := flag.String("backend", "memory", fmt.Sprintf("storage backend %v", registry.Backends()))
 	strategy := flag.String("strategy", "standard", fmt.Sprintf("filter strategy %v", registry.Strategies()))
 	hashName := flag.String("hash", "fnv1a", fmt.Sprintf("hash function %v", registry.Hashes()))
+	positions := flag.String("positions", "seeded", fmt.Sprintf("how the k positions are derived %v", registry.Positions()))
 	n := flag.Uint64("n", 1_000_000, "expected number of items")
 	p := flag.Float64("p", 0.01, "target false-positive rate")
 	load := flag.String("load", "", "file of names (one per line) to add before running the command")
@@ -34,7 +37,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	cfg := registry.Config{Backend: *backend, Strategy: *strategy, Hash: *hashName, N: *n, P: *p}
+	cfg := registry.Config{Backend: *backend, Strategy: *strategy, Hash: *hashName, Positions: *positions, N: *n, P: *p}
 	f, info, err := registry.New(ctx, cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -71,7 +74,7 @@ func usage() {
 commands:
   info          show filter size (m bits, k hashes, memory)
   check NAME... check names (combine with -load)
-  repl          interactive: "add NAME", "check NAME"
+  repl          interactive: "add NAME", "check NAME", "remove NAME" (counting only)
   fp            add n items, query n absent items, report false-positive rate
 
 flags:
@@ -80,7 +83,7 @@ flags:
 }
 
 func printInfo(cfg registry.Config, info registry.Info) {
-	fmt.Printf("backend=%s strategy=%s hash=%s\n", cfg.Backend, cfg.Strategy, cfg.Hash)
+	fmt.Printf("backend=%s strategy=%s hash=%s positions=%s\n", cfg.Backend, cfg.Strategy, cfg.Hash, cfg.Positions)
 	fmt.Printf("n=%d p=%v → m=%d bits, k=%d hashes, %.2f MB (%.2f bits/item)\n",
 		cfg.N, cfg.P, info.M, info.K, float64(info.SizeBytes)/(1<<20), float64(info.M)/float64(cfg.N))
 }
@@ -100,7 +103,12 @@ func check(ctx context.Context, f probabloom.Filter, names []string) error {
 }
 
 func repl(ctx context.Context, f probabloom.Filter, in io.Reader) error {
-	fmt.Println(`commands: "add NAME", "check NAME", ctrl+D to quit`)
+	help := `commands: "add NAME", "check NAME", ctrl+D to quit`
+	remover, canRemove := f.(probabloom.Remover)
+	if canRemove {
+		help = `commands: "add NAME", "check NAME", "remove NAME", ctrl+D to quit`
+	}
+	fmt.Println(help)
 	sc := bufio.NewScanner(in)
 	for fmt.Print("> "); sc.Scan(); fmt.Print("> ") {
 		fields := strings.Fields(sc.Text())
@@ -115,8 +123,20 @@ func repl(ctx context.Context, f probabloom.Filter, in io.Reader) error {
 			if err := check(ctx, f, fields[1:]); err != nil {
 				return err
 			}
+		case len(fields) == 2 && fields[0] == "remove" && canRemove:
+			err := remover.Remove(ctx, []byte(fields[1]))
+			switch {
+			case errors.Is(err, counting.ErrNotPresent):
+				fmt.Println("not present, nothing removed")
+			case err != nil:
+				return err
+			default:
+				fmt.Println("removed")
+			}
+		case len(fields) == 2 && fields[0] == "remove":
+			fmt.Println("this strategy does not support remove (use -strategy=counting)")
 		default:
-			fmt.Println(`expected "add NAME" or "check NAME"`)
+			fmt.Println(help)
 		}
 	}
 	fmt.Println()
@@ -131,7 +151,7 @@ func fp(ctx context.Context, f probabloom.Filter, cfg registry.Config, info regi
 	}
 	expected := sizing.EstimatedFPRate(sizing.Params{M: info.M, K: info.K}, cfg.N)
 	fmt.Printf("target    %.4f%%\n", cfg.P*100)
-	fmt.Printf("formula   %.4f%%\n", expected*100)
+	fmt.Printf("formula   %.4f%%  (standard bloom formula for this m and k)\n", expected*100)
 	fmt.Printf("measured  %.4f%%  (%d false positives / %d queries)\n", res.Rate()*100, res.FalsePositives, res.Queried)
 	return nil
 }

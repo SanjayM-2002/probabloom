@@ -37,3 +37,5 @@ func (b *Bits) Test(_ context.Context, positions []uint64) (bool, error) {
 func (b *Bits) Len() uint64 { return b.m }
 
 func (b *Bits) SizeBytes() uint64 { return uint64(len(b.words)) * 8 }
+
+func Factory(m uint64) store.BitStore { return NewBits(m) }

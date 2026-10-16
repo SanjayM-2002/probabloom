@@ -1,25 +1,25 @@
-// Classic bloom filter: position i = hash(seed=i, data) % m.
+// Classic bloom filter: k positions anywhere in one m-bit array.
 package standard
 
 import (
 	"context"
 
 	"github.com/SanjayM-2002/probabloom"
-	"github.com/SanjayM-2002/probabloom/internal/hash"
+	"github.com/SanjayM-2002/probabloom/internal/probe"
 	"github.com/SanjayM-2002/probabloom/internal/sizing"
 	"github.com/SanjayM-2002/probabloom/store"
 )
 
 type Filter struct {
 	bits   store.BitStore
-	hash   hash.Func
+	probe  probe.Func
 	params sizing.Params
 }
 
 var _ probabloom.Filter = (*Filter)(nil)
 
-func New(bits store.BitStore, hashFn hash.Func, params sizing.Params) *Filter {
-	return &Filter{bits: bits, hash: hashFn, params: params}
+func New(newBits store.Factory, p probe.Func, params sizing.Params) *Filter {
+	return &Filter{bits: newBits(params.M), probe: p, params: params}
 }
 
 func (f *Filter) Add(ctx context.Context, data []byte) error {
@@ -32,10 +32,13 @@ func (f *Filter) Contains(ctx context.Context, data []byte) (bool, error) {
 
 func (f *Filter) Params() sizing.Params { return f.params }
 
+func (f *Filter) SizeBytes() uint64 { return f.bits.SizeBytes() }
+
 func (f *Filter) positions(data []byte) []uint64 {
 	pos := make([]uint64, f.params.K)
+	f.probe(data, pos)
 	for i := range pos {
-		pos[i] = f.hash(uint64(i), data) % f.params.M
+		pos[i] %= f.params.M
 	}
 	return pos
 }

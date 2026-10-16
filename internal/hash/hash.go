@@ -8,7 +8,9 @@ import (
 type Func func(seed uint64, data []byte) uint64
 
 var funcs = map[string]Func{
-	"fnv1a": FNV1a,
+	"fnv1a":   FNV1a,
+	"xxh64":   XXH64,
+	"murmur3": Murmur3,
 }
 
 func Get(name string) (Func, error) {
