@@ -13,8 +13,9 @@ type Func func(data []byte, out []uint64)
 type Mode func(h hash.Func) Func
 
 var modes = map[string]Mode{
-	"seeded": Seeded,
-	"double": Double,
+	"seeded":   Seeded,
+	"double":   Double,
+	"enhanced": Enhanced,
 }
 
 // v_i = h(seed=i, data)
@@ -34,6 +35,21 @@ func Double(h hash.Func) Func {
 		h2 := h(1, data) | 1
 		for i := range out {
 			out[i] = h1 + uint64(i)*h2
+		}
+	}
+}
+
+// Dillinger-Manolios: v_i = h1 + i*h2 + (i^3-i)/6. The cubic term stops the
+// probes from forming a straight line, which double hashing can do when h2
+// shares a factor with m.
+func Enhanced(h hash.Func) Func {
+	return func(data []byte, out []uint64) {
+		x := h(0, data)
+		y := h(1, data)
+		for i := range out {
+			out[i] = x
+			x += y
+			y += uint64(i + 1)
 		}
 	}
 }

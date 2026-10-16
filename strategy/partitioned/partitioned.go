@@ -45,3 +45,7 @@ func (f *Filter) positions(data []byte) []uint64 {
 	}
 	return pos
 }
+
+func (f *Filter) MarshalBinary() ([]byte, error) { return store.Marshal(f.bits) }
+
+func (f *Filter) UnmarshalBinary(data []byte) error { return store.Unmarshal(f.bits, data) }

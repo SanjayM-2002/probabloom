@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
+	"sync"
 
 	"github.com/SanjayM-2002/probabloom"
 	"github.com/SanjayM-2002/probabloom/internal/hash"
@@ -19,12 +21,57 @@ import (
 	"github.com/SanjayM-2002/probabloom/strategy/standard"
 )
 
+var strategies = []string{"standard", "counting", "partitioned", "blocked", "scalable"}
+
+type Config struct {
+	Backend   string  `json:"backend"`
+	Strategy  string  `json:"strategy,omitempty"`
+	Hash      string  `json:"hash,omitempty"`
+	Positions string  `json:"positions,omitempty"`
+	N         uint64  `json:"n"`
+	P         float64 `json:"p"`
+
+	RedisAddr string `json:"-"`
+	RedisDB   int    `json:"-"`
+	RedisKey  string `json:"-"`
+}
+
+type Info struct {
+	M         uint64 // 0 when the backend doesn't expose it
+	K         uint64
+	SizeBytes uint64
+	Layers    int
+}
+
+// BackendFunc opens a filter on a backend. Backends other than memory
+// register themselves from an init function, so a binary only contains the
+// backends it imports.
+type BackendFunc func(ctx context.Context, cfg Config) (probabloom.Filter, error)
+
 var (
-	backends   = []string{"memory"}
-	strategies = []string{"standard", "counting", "partitioned", "blocked", "scalable"}
+	mu       sync.RWMutex
+	backends = map[string]BackendFunc{"memory": newMemory}
 )
 
-func Backends() []string { return slices.Clone(backends) }
+func RegisterBackend(name string, fn BackendFunc) {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, dup := backends[name]; dup {
+		panic("registry: backend registered twice: " + name)
+	}
+	backends[name] = fn
+}
+
+func Backends() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	names := make([]string, 0, len(backends))
+	for n := range backends {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
 
 func Strategies() []string { return slices.Clone(strategies) }
 
@@ -32,37 +79,37 @@ func Hashes() []string { return hash.Names() }
 
 func Positions() []string { return probe.Names() }
 
-type Config struct {
-	Backend   string
-	Strategy  string
-	Hash      string
-	Positions string
-	N         uint64
-	P         float64
-}
-
-type Info struct {
-	M         uint64
-	K         uint64
-	SizeBytes uint64
-}
-
-type filter interface {
-	probabloom.Filter
-	Params() sizing.Params
-	SizeBytes() uint64
-}
-
-func New(_ context.Context, cfg Config) (probabloom.Filter, Info, error) {
-	f, err := build(cfg)
-	if err != nil {
-		return nil, Info{}, err
+func New(ctx context.Context, cfg Config) (probabloom.Filter, error) {
+	mu.RLock()
+	open, ok := backends[cfg.Backend]
+	mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("unknown backend %q (available: %v)", cfg.Backend, Backends())
 	}
-	p := f.Params()
-	return f, Info{M: p.M, K: p.K, SizeBytes: f.SizeBytes()}, nil
+	return open(ctx, cfg)
 }
 
-func build(cfg Config) (filter, error) {
+func Describe(ctx context.Context, f probabloom.Filter) (Info, error) {
+	if d, ok := f.(interface {
+		Info(context.Context) (Info, error)
+	}); ok {
+		return d.Info(ctx)
+	}
+	var info Info
+	if p, ok := f.(interface{ Params() sizing.Params }); ok {
+		info.M, info.K = p.Params().M, p.Params().K
+	}
+	if s, ok := f.(interface{ SizeBytes() uint64 }); ok {
+		info.SizeBytes = s.SizeBytes()
+	}
+	info.Layers = 1
+	if l, ok := f.(interface{ Layers() int }); ok {
+		info.Layers = l.Layers()
+	}
+	return info, nil
+}
+
+func newMemory(_ context.Context, cfg Config) (probabloom.Filter, error) {
 	params, err := sizing.Optimal(cfg.N, cfg.P)
 	if err != nil {
 		return nil, err
@@ -76,10 +123,6 @@ func build(cfg Config) (filter, error) {
 		return nil, err
 	}
 	pr := mode(hashFn)
-
-	if cfg.Backend != "memory" {
-		return nil, fmt.Errorf("unknown backend %q (available: %v)", cfg.Backend, backends)
-	}
 	newBits := memory.Factory
 
 	switch cfg.Strategy {

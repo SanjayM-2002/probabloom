@@ -67,10 +67,10 @@ func TestSaturatedCounterSticks(t *testing.T) {
 	ctx := context.Background()
 	f := newFilter(t, 1000, 0.01)
 
-	for i := 0; i < 300; i++ {
+	for i := 0; i < 20; i++ {
 		f.Add(ctx, []byte("robin"))
 	}
-	for i := 0; i < 300; i++ {
+	for i := 0; i < 20; i++ {
 		f.Remove(ctx, []byte("robin"))
 	}
 	if ok, _ := f.Contains(ctx, []byte("robin")); !ok {

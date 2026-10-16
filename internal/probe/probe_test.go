@@ -47,3 +47,15 @@ func TestDoubleUsesTwoHashCalls(t *testing.T) {
 		t.Errorf("double made %d hash calls, want 2", calls)
 	}
 }
+
+func TestEnhancedFormula(t *testing.T) {
+	h := func(seed uint64, _ []byte) uint64 { return 1000 + seed*7 } // h1=1000, h2=1007
+	out := make([]uint64, 6)
+	Enhanced(h)(nil, out)
+	for i, got := range out {
+		n := uint64(i)
+		if want := 1000 + n*1007 + (n*n*n-n)/6; got != want {
+			t.Errorf("v_%d = %d, want %d", i, got, want)
+		}
+	}
+}

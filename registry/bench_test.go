@@ -17,7 +17,7 @@ func BenchmarkMatrix(b *testing.B) {
 	for _, strategy := range Strategies() {
 		for _, h := range Hashes() {
 			for _, pos := range Positions() {
-				f, _, err := New(ctx, Config{Backend: "memory", Strategy: strategy, Hash: h, Positions: pos, N: 1_000_000, P: 0.01})
+				f, err := New(ctx, memoryConfig(strategy, h, pos, 1_000_000, 0.01))
 				if err != nil {
 					b.Fatal(err)
 				}
